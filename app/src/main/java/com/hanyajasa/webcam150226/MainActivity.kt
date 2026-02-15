@@ -138,7 +138,13 @@ fun StreamingScreen(mode: StreamingMode) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        CameraPreview(imageFlow)
+        val cameraModifier = if (mode == StreamingMode.WAN) {
+            Modifier.size(0.dp) // Sembunyikan preview
+        } else {
+            Modifier.fillMaxSize()
+        }
+        CameraPreview(modifier = cameraModifier, imageFlow = imageFlow)
+
 
         when(mode) {
             StreamingMode.LAN -> {
@@ -152,14 +158,31 @@ fun StreamingScreen(mode: StreamingMode) {
                 )
             }
             StreamingMode.WAN -> {
+                // Tampilkan teks di tengah saat mode WAN
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Streaming to VPS...",
+                        color = Color.Black,
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    Text(
+                        "Status: $wanStatus",
+                        color = Color.Black,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+
                 WanUploader(imageFlow = imageFlow, onStatusChange = { wanStatus = it })
                 Text(
-                    text = """WAN Mode: $wanStatus
-Sending to: $WAN_SERVER_URL""",
+                    text = """Sending to: $WAN_SERVER_URL""",
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(16.dp),
-                    color = Color.White
+                    color = Color.Black
                 )
             }
             else -> {}
@@ -245,7 +268,7 @@ fun WanUploader(imageFlow: StateFlow<ByteArray?>, onStatusChange: (String) -> Un
 
 
 @Composable
-fun CameraPreview(imageFlow: MutableStateFlow<ByteArray?>) {
+fun CameraPreview(modifier: Modifier = Modifier, imageFlow: MutableStateFlow<ByteArray?>) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
@@ -308,6 +331,6 @@ fun CameraPreview(imageFlow: MutableStateFlow<ByteArray?>) {
 
             previewView
         },
-        modifier = Modifier.fillMaxSize()
+        modifier = modifier
     )
 }
