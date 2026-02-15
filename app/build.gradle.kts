@@ -64,6 +64,8 @@ dependencies {
     // Ktor dependencies
     implementation("io.ktor:ktor-server-core-jvm:3.4.0")
     implementation("io.ktor:ktor-server-netty-jvm:3.4.0")
+    implementation("io.ktor:ktor-client-core:3.4.0")
+    implementation("io.ktor:ktor-client-cio:3.4.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
