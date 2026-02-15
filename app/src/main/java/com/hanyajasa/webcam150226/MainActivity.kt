@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 import java.util.concurrent.Executors
 
 // Alamat IP publik VPS Anda
@@ -128,6 +129,9 @@ fun StreamingScreen(mode: StreamingMode) {
     val context = LocalContext.current
     var ipAddress by remember { mutableStateOf("Detecting IP...") }
     var wanStatus by remember { mutableStateOf("Idle") }
+    val streamId by remember { mutableStateOf(UUID.randomUUID().toString()) }
+    val wanUrlWithId = "$WAN_SERVER_URL/$streamId"
+
 
     LaunchedEffect(Unit) {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -176,9 +180,9 @@ fun StreamingScreen(mode: StreamingMode) {
                     )
                 }
 
-                WanUploader(imageFlow = imageFlow, onStatusChange = { wanStatus = it })
+                WanUploader(imageFlow = imageFlow, onStatusChange = { wanStatus = it }, wanUrl = wanUrlWithId)
                 Text(
-                    text = """Sending to: $WAN_SERVER_URL""",
+                    text = "Sending to: $wanUrlWithId",
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(16.dp),
@@ -225,7 +229,7 @@ fun LanStreamer(imageFlow: StateFlow<ByteArray?>) {
 }
 
 @Composable
-fun WanUploader(imageFlow: StateFlow<ByteArray?>, onStatusChange: (String) -> Unit) {
+fun WanUploader(imageFlow: StateFlow<ByteArray?>, onStatusChange: (String) -> Unit, wanUrl: String) {
     val client = remember { HttpClient(CIO) }
 
     DisposableEffect(Unit) {
@@ -236,7 +240,7 @@ fun WanUploader(imageFlow: StateFlow<ByteArray?>, onStatusChange: (String) -> Un
 
     // LaunchedEffect will run this coroutine and keep it alive.
     // We use .collect to process every frame sequentially.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(wanUrl) {
         imageFlow.collect { imageBytes ->
             // Only proceed if we have a valid image byte array.
             if (imageBytes != null) {
@@ -246,7 +250,7 @@ fun WanUploader(imageFlow: StateFlow<ByteArray?>, onStatusChange: (String) -> Un
                 withContext(Dispatchers.IO) {
                     try {
                         onStatusChange("Uploading...")
-                        val response: HttpResponse = client.post(WAN_SERVER_URL) {
+                        val response: HttpResponse = client.post(wanUrl) {
                             setBody(imageBytes)
                             contentType(ContentType.Image.JPEG)
                         }

@@ -1,101 +1,87 @@
-//npm init -y
-//npm install express
-
-//npm install pm2 -g
-//pm2 start index
-//pm2 stop index
-//pm2 restart index
-//pm2 logs
-//http://194.233.84.144:8080/video
+//http://194.233.84.144:8080/video/e391f923-9afe-47e4-905e-bd9bafbe79db
 
 const express = require('express');
-const http = require('http');
-
+const EventEmitter = require('events');
 const app = express();
 const port = 8080;
 
-let latestFrame = null;
-const streamClients = [];
+// Emitter untuk memberi sinyal saat frame baru tiba untuk stream tertentu
+class StreamManager extends EventEmitter {}
+const streamManager = new StreamManager();
 
-// Middleware untuk logging setiap request yang masuk
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] Request dari ${req.ip} -> ${req.method} ${req.url}`);
-    next();
+// Penyimpanan in-memory sederhana untuk frame terbaru dari setiap stream
+const streams = {};
+
+// Middleware untuk mem-parsing body mentah untuk data gambar
+app.use('/stream/:streamId', express.raw({
+  type: 'image/jpeg',
+  limit: '10mb' // Sesuaikan batas ukuran jika perlu
+}));
+
+// Endpoint untuk aplikasi Android mengirim (POST) frame gambar
+app.post('/stream/:streamId', (req, res) => {
+  const streamId = req.params.streamId;
+  const frame = req.body;
+
+  // Simpan frame terbaru
+  streams[streamId] = frame;
+  
+  // Beri tahu listener bahwa frame baru tersedia untuk streamId ini
+  streamManager.emit(`frame-${streamId}`, frame);
+  
+  // Kirim log ke konsol, mirip dengan log Anda sebelumnya
+  console.log(`[${new Date().toISOString()}] Request dari ${req.ip} -> POST /stream/${streamId}`);
+  
+  res.status(200).send('OK');
 });
 
-// Middleware untuk menerima data gambar mentah
-app.use(express.raw({ type: 'image/jpeg', limit: '10mb' }));
+// Endpoint untuk browser/klien melihat video stream
+app.get('/video/:streamId', (req, res) => {
+  const streamId = req.params.streamId;
 
-/**
- * ENDPOINT: POST /stream
- * Tempat aplikasi Android mengirimkan data gambar.
- */
-app.post('/stream', (req, res) => {
-    // Pastikan body tidak kosong
-    if (!req.body || req.body.length === 0) {
-        console.log(' -> Menerima request /stream kosong, diabaikan.');
-        return res.sendStatus(400); // Bad Request
-    }
-    
-    console.log(` -> Menerima frame dari Android, ukuran: ${req.body.length} bytes.`);
-    latestFrame = req.body;
-    
-    // Kirim frame ke semua penonton yang terhubung
-    if (streamClients.length > 0) {
-        console.log(` -> Meneruskan frame ke ${streamClients.length} penonton.`);
-        for (const client of streamClients) {
-            client.write('--frame\r\n');
-            client.write('Content-Type: image/jpeg\r\n');
-            client.write(`Content-Length: ${latestFrame.length}\r\n`);
-            client.write('\r\n');
-            client.write(latestFrame);
-            client.write('\r\n');
-        }
-    }
-
-    // Beri respons OK ke aplikasi Android.
-    res.sendStatus(200);
-});
-
-/**
- * ENDPOINT: GET /video
- * Tempat browser akan mengambil video stream (MJPEG).
- */
-app.get('/video', (req, res) => {
+  // Fungsi untuk memulai streaming ke klien
+  function startStream() {
+    // Atur header HTTP untuk MJPEG stream
     res.writeHead(200, {
-        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Pragma': 'no-cache'
+      'Content-Type': 'multipart/x-mixed-replace; boundary=--frame',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Pragma': 'no-cache'
     });
-    
-    streamClients.push(res);
-    console.log(` -> Penonton baru terhubung! Total penonton: ${streamClients.length}`);
 
-    // Jika ada frame pertama yang tersedia, kirimkan langsung.
-    if (latestFrame) {
-        console.log(' -> Mengirim frame pertama ke penonton baru.');
-        res.write('--frame\r\n');
-        res.write('Content-Type: image/jpeg\r\n');
-        res.write(`Content-Length: ${latestFrame.length}\r\n`);
-        res.write('\r\n');
-        res.write(latestFrame);
-        res.write('\r\n');
+    // Fungsi listener yang akan dipanggil setiap ada frame baru
+    const frameListener = (frame) => {
+      res.write(`--frame\n`);
+      res.write(`Content-Type: image/jpeg\n`);
+      res.write(`Content-Length: ${frame.length}\n\n`);
+      res.write(frame);
+      res.write(`\n`);
+    };
+
+    // Langsung kirim frame pertama jika sudah ada
+    if (streams[streamId]) {
+        frameListener(streams[streamId]);
     }
 
-    // Saat klien menutup koneksi, hapus dari daftar.
+    // Pasang listener untuk frame-frame berikutnya
+    streamManager.on(`frame-${streamId}`, frameListener);
+
+    // Saat klien menutup koneksi, hapus listener untuk menghemat memori
     req.on('close', () => {
-        const index = streamClients.indexOf(res);
-        if (index !== -1) {
-            streamClients.splice(index, 1);
-        }
-        console.log(` -> Penonton terputus. Sisa penonton: ${streamClients.length}`);
+      streamManager.removeListener(`frame-${streamId}`, frameListener);
+      res.end();
     });
+  }
+  
+  // Jika stream belum ada, tunggu frame pertama datang
+  if (!streams[streamId]) {
+    streamManager.once(`frame-${streamId}`, startStream);
+  } else {
+    // Jika stream sudah ada, langsung mulai
+    startStream();
+  }
 });
 
-// Jalankan server
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Server siap di http://0.0.0.0:${port}`);
-    console.log(`Buka http://<IP_VPS_ANDA>:${port}/video di browser untuk melihat stream.`);
-    console.log('Menunggu koneksi dari aplikasi Android...');
+app.listen(port, () => {
+  console.log(`Server streaming berjalan pada port ${port}`);
 });
